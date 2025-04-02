@@ -12,7 +12,7 @@ const roomUsers={}; //Object of arrays to store all the online users room wise
 
 const io=new Server(server,{
   cors:{
-    origin:'https://mslicechat.netlify.app',
+    origin:'https://chatmango.netlify.app',
     methods: ['GET', 'POST'],
   },
 })
