@@ -3,7 +3,6 @@ const http=require('http');
 const {Server}=require('socket.io');
 const cors=require('cors');
 const Filter=require('bad-words');
-const { timeStamp } = require('console');
 const filter=new Filter();
 
 const app=express();
@@ -41,7 +40,7 @@ io.on('connection',(socket)=>{ //When a user joins / enters chat app
     io.to(room).emit('online_list',roomUsers); //Send everyone in the room the list of users
   });
 
-socket.on('send_message',({userName,room,message})=>{ //When a user sends message
+socket.on('send_message',({userName,room,message,timeStamp})=>{ //When a user sends message
   let cleanMsg=message; //Filter can break on emojis and special characters , so use this logic
   console.log("🔥 Deployed version running");
   
@@ -62,12 +61,6 @@ socket.on('send_message',({userName,room,message})=>{ //When a user sends messag
     cleanMsg = message;
   }
   console.log(`📩 Message in ${room} from ${userName}: ${cleanMsg}`); 
-  const timeStamp = new Date().toLocaleTimeString('en-US', { // Get current time
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }); 
-
   io.to(room).emit('receive_message',{userName,message:cleanMsg,timeStamp}); //Send the message and timestamp to everyone
 });
 
