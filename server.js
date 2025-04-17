@@ -4,17 +4,164 @@ const {Server}=require('socket.io');
 const cors=require('cors');
 const Filter=require('bad-words');
 const filter=new Filter();
+const mongoose = require("mongoose");
+const User = require('./models/User');
+const Chatted=require('./models/Chatted');
+const { timeStamp } = require('console');
+const userSockets={}; //Stores the sockets connected
+const frontendLink="https://chatmango.netlify.app";
 
 const app=express();
+app.use(cors());
+app.use(express.json());
 const server=http.createServer(app);
 const roomUsers={}; //Object of arrays to store all the online users room wise
 
 const io=new Server(server,{
   cors:{
-    origin:'https://chatmango.netlify.app',
-    methods: ['GET', 'POST'],
+    origin:`${frontendLink}`,
+    methods: ['GET', 'POST' , 'PUT' , 'DELETE'],
   },
-})
+});
+
+mongoose.connect("mongodb+srv://jarrar:mslice@mangocluster.nbeelpo.mongodb.net/mangochat?retryWrites=true&w=majority&appName=Mangocluster", {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => {
+  console.log("✅ Connected to MongoDB");
+}).catch((err) => {
+  console.error("❌ MongoDB connection failed:", err);
+});
+
+// Signup
+app.post("/signup", async (req, res) => {
+  const { email, userName, password } = req.body;
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: "Username already exists" });
+
+    const newUser = new User({ email, userName, password }); // plain password for now
+    await newUser.save();
+
+    res.status(201).json({ message: "Signup successful" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Login
+app.post("/login", async (req, res) => {
+  console.log('Inside /login ! ');
+  const { email, password } = req.body;
+  try {
+    console.log('Inside try block of /login ! ');
+    const user = await User.findOne({ email });
+    if (!user || user.password !== password) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+    res.status(200).json({ message: "Login successful" });
+  } catch (err) {
+    console.log('Inside catch block of /login ! ');
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get('/listOfUsers',async(req,res)=>{ //Retrieves list of users registered in the app
+  const {value,email}=req.query;
+  try{
+    const findUsers = await User.find({
+      $and: [
+        { email: { $regex: '^' + value, $options: 'i' } },
+        { email: { $ne: email } }
+      ]
+    });
+    if(findUsers) { //Users are registered
+      console.log('Users exist ! ');
+      return res.status(200).json(findUsers);
+    }
+    return res.status(404).json({message:'No users are registered other than you ! '}); //Only the current user is registered
+  }
+  catch(err) {
+    console.log('Inside catch block of /listOfUsers',err);
+    return res.status(500).json({message: " Server error "});
+  }
+});
+
+app.post('/storeMsg', async (req, res) => {
+  const { sender, reciever, recieverName, msg } = req.body;
+
+  try {
+    const newMessage = { //Make a message object to push in messages array in mongo db
+      text: msg,
+      timeStamp: new Date()
+    };
+
+    // Try to find existing conversation
+    const existingChat = await Chatted.findOne({
+      senderEmail: sender,
+      recieverEmail: reciever
+    }) || await Chatted.findOne({
+      senderEmail: reciever,
+      recieverEmail: sender
+    }) 
+
+    if (existingChat) {
+      existingChat.messages.push(newMessage);
+      await existingChat.save();
+      console.log("📨 Message added to existing chat.");
+    } else {
+      // Create new chat
+      const insertMsg = new Chatted({
+        senderEmail: sender,
+        recieverEmail: reciever,
+        recieverUserName: recieverName,
+        messages: [newMessage]
+      });
+      await insertMsg.save();
+      console.log("🆕 New chat created and message saved.");
+    }
+
+    return res.status(200).json({ message: "Message stored successfully!" });
+  } catch (err) {
+    console.error("❌ Error storing message:", err);
+    return res.status(500).json({ message: "Server error occurred!" });
+  }
+});
+
+app.get('/chatHistory', async (req, res) => {
+  const { sender } = req.query; // Logged-in user email
+
+  try {
+    console.log('Inside try block of /chatHistory !');
+
+    const findChat = await Chatted.find({
+      $or: [
+        { senderEmail: sender },
+        { recieverEmail: sender }
+      ]
+    });
+
+    if (findChat.length === 0) {
+      console.log('No chat history found for sender !');
+      return res.status(404).json({ message: 'Chat history not found !' });
+    }
+
+    // Get names of other users in each chat
+    const names = await Promise.all(
+      findChat.map(async (chat) => {
+        const otherEmail = chat.senderEmail === sender ? chat.recieverEmail : chat.senderEmail;
+        const otherUser = await User.findOne({ email: otherEmail });
+        return otherUser ? otherUser.userName : "Unknown";
+      })
+    );
+
+    console.log('Found chat history!');
+    return res.status(200).json({ findChat, names });
+  } catch (err) {
+    console.log('Inside catch block of /chatHistory ! ', err);
+    return res.status(500).json({ message: 'Some error occurred !' });
+  }
+});
 
 io.on('connection',(socket)=>{ //When a user joins / enters chat app
   console.log(`🔌 User connected: ${socket.id}`);
@@ -77,7 +224,34 @@ socket.on('send_message',({userName,room,message,timeStamp})=>{ //When a user se
 
 socket.on('typing',({userName,room})=>{ //Someone is typing
   socket.to(room).emit('typing_list',`${userName} is typing...`);
-}); 
+});
+
+socket.on('join_private_chat',({email})=>{ //Each user joins their own private room
+  if(userSockets[email]) { //Preventing duplicate socket connections
+    const oldSocketId=userSockets[email];
+    const oldSocket=io.sockets.sockets.get(oldSocketId);
+    if(oldSocket) {
+      oldSocket.disconnect(true);
+    }
+  }
+  userSockets[email]=socket.id;
+  socket.join(email);
+  console.log(`📥 User with email ${email} joined their private room`);
+})
+
+socket.on('private_msg',({sender,recipient,message})=>{ //In frontend user sent a message / chatted to someone
+  console.log(`Message ${message} sent from ${sender} to ${recipient}`);
+  io.to(recipient).emit('recieve_private_msg',{ //Send the message to the recipient's socket
+    sender,
+    message,
+    timeStamp:new Date()
+  });
+  io.to(sender).emit('recieve_private_msg', {
+    sender,
+    message,
+    timeStamp:new Date()}); //Send the messgage to sender
+});
+
 });
 
 const PORT=5000;
