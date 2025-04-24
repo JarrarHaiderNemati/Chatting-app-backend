@@ -9,6 +9,7 @@ const User = require('./models/User');
 const Chatted=require('./models/Chatted');
 const { timeStamp } = require('console');
 const userSockets={}; //Stores the sockets connected
+//const frontendLink="http://localhost:5173";
 const frontendLink="https://chatmango.netlify.app";
 
 const app=express();
@@ -91,31 +92,34 @@ app.post('/storeMsg', async (req, res) => {
   const { sender, reciever, recieverName, msg } = req.body;
 
   try {
-    const newMessage = { //Make a message object to push in messages array in mongo db
-      text: msg,
-      timeStamp: new Date()
-    };
-
     // Try to find existing conversation
+    let y=0; //Short circuit variable to check which from the below line is executed first
     const existingChat = await Chatted.findOne({
       senderEmail: sender,
       recieverEmail: reciever
-    }) || await Chatted.findOne({
+    }) || (y=1&&await Chatted.findOne({
       senderEmail: reciever,
       recieverEmail: sender
-    }) 
+    }))
 
     if (existingChat) {
-      existingChat.messages.push(newMessage);
-      await existingChat.save();
-      console.log("📨 Message added to existing chat.");
-    } else {
+      const message = {
+        sender: y === 1 ? reciever : sender,
+        reciever: y === 1 ? sender : reciever,
+        text: msg,
+        timeStamp: new Date()
+      };
+  existingChat.messages.push(message);
+  await existingChat.save();
+  console.log("📨 Message added to existing chat.");
+  y=0;
+} else {
       // Create new chat
       const insertMsg = new Chatted({
         senderEmail: sender,
         recieverEmail: reciever,
         recieverUserName: recieverName,
-        messages: [newMessage]
+        messages: [{sender:sender,reciever:reciever,text:msg,timeStamp:new Date}]
       });
       await insertMsg.save();
       console.log("🆕 New chat created and message saved.");
@@ -127,6 +131,28 @@ app.post('/storeMsg', async (req, res) => {
     return res.status(500).json({ message: "Server error occurred!" });
   }
 });
+
+app.get('/retrieveMsgs',async(req,res)=>{ //Retriev list of msgs between the user and his chat which he clicks
+  const {userEmail,otherEmail}=req.query;
+  if(!userEmail||!otherEmail) { //User email and email of whos profile we clicked from chat history
+    console.log('One of the email is missing, /retrieveMsgs ! ');
+  }
+  try{
+    console.log('Inside try block of /retrieveMsgs ! ');
+    const fetchMsgs=await Chatted.findOne({
+      $or: [
+        { senderEmail: sender },
+        { recieverEmail: sender }
+      ]
+    });
+    if(fetchMsgs&&fetchMsgs.length>0) { //Conversation found
+      return res.status(200).json(fetchMsgs); //Return the conversation details
+    } 
+  }
+  catch(err) {
+    console.log('Inside catch block of /retrieveMsgs ! ');
+  }
+}); 
 
 app.get('/chatHistory', async (req, res) => {
   const { sender } = req.query; // Logged-in user email
@@ -146,15 +172,20 @@ app.get('/chatHistory', async (req, res) => {
       return res.status(404).json({ message: 'Chat history not found !' });
     }
 
+    let counter=0;
+    const names={}; //A names obj having reciever name and email
     // Get names of other users in each chat
-    const names = await Promise.all(
+    await Promise.all(
       findChat.map(async (chat) => {
         const otherEmail = chat.senderEmail === sender ? chat.recieverEmail : chat.senderEmail;
         const otherUser = await User.findOne({ email: otherEmail });
-        return otherUser ? otherUser.userName : "Unknown";
+        return  names[counter++] = {
+          email: otherEmail,
+          name: otherUser ? otherUser.userName : "Unknown"
+        };
       })
     );
-
+    counter=0; //Reset counter 
     console.log('Found chat history!');
     return res.status(200).json({ findChat, names });
   } catch (err) {
@@ -243,11 +274,13 @@ socket.on('private_msg',({sender,recipient,message})=>{ //In frontend user sent 
   console.log(`Message ${message} sent from ${sender} to ${recipient}`);
   io.to(recipient).emit('recieve_private_msg',{ //Send the message to the recipient's socket
     sender,
+    recipient,
     message,
     timeStamp:new Date()
   });
   io.to(sender).emit('recieve_private_msg', {
     sender,
+    recipient,
     message,
     timeStamp:new Date()}); //Send the messgage to sender
 });
