@@ -9,8 +9,9 @@ const User = require('./models/User');
 const Chatted=require('./models/Chatted');
 const { timeStamp } = require('console');
 const userSockets={}; //Stores the sockets connected
-//const frontendLink="http://localhost:5173";
-const frontendLink="https://chatmango.netlify.app";
+const frontendLink="http://localhost:5173";
+require('dotenv').config(); 
+//const frontendLink="https://chatmango.netlify.app";
 
 const app=express();
 app.use(cors());
@@ -25,7 +26,7 @@ const io=new Server(server,{
   },
 });
 
-mongoose.connect("mongodb+srv://jarrar:mslice@mangocluster.nbeelpo.mongodb.net/mangochat?retryWrites=true&w=majority&appName=Mangocluster", {
+mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 }).then(() => {
@@ -193,6 +194,30 @@ app.get('/chatHistory', async (req, res) => {
     return res.status(500).json({ message: 'Some error occurred !' });
   }
 });
+
+app.get('/chatWithUser',async(req,res)=>{ //Fetch all chats between user and the chat which he clicked on in the frontend
+  const {sender}=req.query; //User (who is using the app right now) email
+  try{
+  console.log('Inside try block of /chatWithUser ! ');
+  const findChat = await Chatted.find({
+    $or: [
+      { senderEmail: sender },
+      { recieverEmail: sender }
+    ]
+  });
+  if(findChat.length>0) { //Chats found 
+    console.log('Chats found between user and the chat which he clicked on in the frontend ! ');
+    return res.status(200).json(findChat);
+  }
+  //Chats not found
+  console.log('Could not find chat between user and the chat he clicked on in the frontend ! ');
+  return res.status(404).json({message:'Could not find chat ! '});
+}
+catch(err) {
+  console.log('Inside catch block of /chatWithUser ! ');
+  return res.status(500).json({message:'Some error occured ! '});
+}
+})
 
 io.on('connection',(socket)=>{ //When a user joins / enters chat app
   console.log(`🔌 User connected: ${socket.id}`);
