@@ -34,7 +34,6 @@ mongoose.connect(process.env.MONGO_URI, {
   console.log("Mongo URI:", process.env.MONGO_URI); 
   console.log("✅ Connected to MongoDB");
 }).catch((err) => {
-  console.log("Mongo URI:", process.env.MONGO_URI); // Add this
   console.error("❌ MongoDB connection failed:", err);
 });
 
@@ -110,7 +109,7 @@ app.post('/storeMsg', async (req, res) => {
       const message = {
         sender: y === 1 ? reciever : sender,
         reciever: y === 1 ? sender : reciever,
-        text: msg,
+        message: msg,
         timeStamp: new Date()
       };
   existingChat.messages.push(message);
@@ -123,7 +122,7 @@ app.post('/storeMsg', async (req, res) => {
         senderEmail: sender,
         recieverEmail: reciever,
         recieverUserName: recieverName,
-        messages: [{sender:sender,reciever:reciever,text:msg,timeStamp:new Date}]
+        messages: [{sender:sender,reciever:reciever,message:msg,timeStamp:new Date()}]
       });
       await insertMsg.save();
       console.log("🆕 New chat created and message saved.");
@@ -197,30 +196,6 @@ app.get('/chatHistory', async (req, res) => {
     return res.status(500).json({ message: 'Some error occurred !' });
   }
 });
-
-app.get('/chatWithUser',async(req,res)=>{ //Fetch all chats between user and the chat which he clicked on in the frontend
-  const {sender}=req.query; //User (who is using the app right now) email
-  try{
-  console.log('Inside try block of /chatWithUser ! ');
-  const findChat = await Chatted.find({
-    $or: [
-      { senderEmail: sender },
-      { recieverEmail: sender }
-    ]
-  });
-  if(findChat.length>0) { //Chats found 
-    console.log('Chats found between user and the chat which he clicked on in the frontend ! ');
-    return res.status(200).json(findChat);
-  }
-  //Chats not found
-  console.log('Could not find chat between user and the chat he clicked on in the frontend ! ');
-  return res.status(404).json({message:'Could not find chat ! '});
-}
-catch(err) {
-  console.log('Inside catch block of /chatWithUser ! ');
-  return res.status(500).json({message:'Some error occured ! '});
-}
-})
 
 io.on('connection',(socket)=>{ //When a user joins / enters chat app
   console.log(`🔌 User connected: ${socket.id}`);

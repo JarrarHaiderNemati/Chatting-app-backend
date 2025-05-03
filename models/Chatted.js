@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
     {
       sender : { type: String, required: true }, 
       reciever: { type: String, required: true },
-      text: { type: String, required: true },
+      message: { type: String, required: true },
       timeStamp: { type: Date, default: Date.now } // auto adds time when message is saved
     }
   ]
